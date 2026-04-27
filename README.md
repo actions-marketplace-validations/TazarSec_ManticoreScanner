@@ -21,7 +21,7 @@ Scan npm dependencies for malicious code using the Manticore behavioral analysis
 
 ## Requirements
 
-- A Manticore account at [tazarsec.dev](https://tazarsec.dev). The GitHub Action authenticates via short-lived GitHub OIDC tokens by default, no long-lived API key needed. The CLI supports both OIDC and API-key auth (see [Authentication](#authentication)).
+- A Manticore account at [tazarsec.dev](https://tazarsec.dev). The GitHub Action authenticates via short-lived GitHub OIDC tokens by default, no long-lived API key needed. The CLI supports both OIDC and API-key auth.
 - A GitHub-hosted or self-hosted runner on Linux, macOS, or Windows (amd64 or arm64).
 - An npm project with a `package.json` and/or `package-lock.json` checked into the repository.
 
@@ -34,7 +34,7 @@ Two composite actions are published from this repository:
 | `TazarSec/ManticoreScanner@v1` | One-shot scan against your committed lockfile. Reports findings, optionally posts a PR comment, and can fail the job on suspicious packages. |
 | `TazarSec/ManticoreScanner/setup@v1` | Installs the `manticore` CLI on the runner PATH so you can invoke `manticore scan` or `manticore exec` from your own pipeline steps. |
 
-**Pin by full commit SHA — recommended.** Manticore uses immutable releases, but commit hash pinning is more robust and is the format GitHub recommends for third-party actions:
+**Pin by full commit SHA.** Manticore uses immutable releases, but commit hash pinning is more robust and is the format GitHub recommends for third-party actions:
 
 ```yaml
 - uses: TazarSec/ManticoreScanner@<full-commit-sha> # v1.2.3
