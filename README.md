@@ -6,7 +6,6 @@ Scan npm dependencies for malicious code using the Manticore behavioral analysis
 
 - [Requirements](#requirements)
 - [GitHub Action](#github-action)
-  - [Authentication](#authentication)
   - [Quick start](#quick-start)
   - [Scan action](#scan-action)
   - [Setup action](#setup-action)
@@ -22,7 +21,7 @@ Scan npm dependencies for malicious code using the Manticore behavioral analysis
 
 ## Requirements
 
-- A Manticore account at [tazarsec.dev](https://tazarsec.dev). The GitHub Action authenticates via short-lived GitHub OIDC tokens by default — no long-lived API key needed. The CLI supports both OIDC and API-key auth (see [Authentication](#authentication)).
+- A Manticore account at [tazarsec.dev](https://tazarsec.dev). The GitHub Action authenticates via short-lived GitHub OIDC tokens by default, no long-lived API key needed. The CLI supports both OIDC and API-key auth (see [Authentication](#authentication)).
 - A GitHub-hosted or self-hosted runner on Linux, macOS, or Windows (amd64 or arm64).
 - An npm project with a `package.json` and/or `package-lock.json` checked into the repository.
 
@@ -35,36 +34,17 @@ Two composite actions are published from this repository:
 | `TazarSec/ManticoreScanner@v1` | One-shot scan against your committed lockfile. Reports findings, optionally posts a PR comment, and can fail the job on suspicious packages. |
 | `TazarSec/ManticoreScanner/setup@v1` | Installs the `manticore` CLI on the runner PATH so you can invoke `manticore scan` or `manticore exec` from your own pipeline steps. |
 
-Both actions download the matching release binary for the runner platform, verify its SHA-256 checksum against the published `checksums.txt`, and add the binary to `PATH` at the resolved release tag.
-
-**Pin by full commit SHA — recommended.** Git tags are mutable, so `@v1` or `@v1.2.3` can silently change underneath your workflow. A 40-character commit SHA is the only tamper-evident pin and is the format GitHub recommends for third-party actions:
+**Pin by full commit SHA — recommended.** Manticore uses immutable releases, but commit hash pinning is more robust and is the format GitHub recommends for third-party actions:
 
 ```yaml
 - uses: TazarSec/ManticoreScanner@<full-commit-sha> # v1.2.3
 ```
 
-The action accepts SHA pins and resolves them back to the matching release tag to download the corresponding binary, so the SHA must point to a commit that is itself a tagged release (an arbitrary commit on `main` will be rejected). Dependabot and Renovate both understand the `@<sha> # vX.Y.Z` convention and will bump both the SHA and the trailing comment when a new release is cut.
-
 The floating `@v1` and lightweight `@v1.2.3` tag pins are also supported for convenience, but SHA pinning is the recommended option when hardening your supply chain.
-
-### Authentication
-
-The action authenticates to the Manticore backend with **GitHub OIDC tokens** by default. Each scan mints a short-lived JWT scoped to the calling workflow (audience `tazarsec.dev`) — no long-lived API key needs to live in Actions secrets, and Manticore can attribute each scan to a specific repository, ref, and workflow.
-
-To enable OIDC, the calling workflow must grant the `id-token: write` permission. The runner then exposes `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` to the action; the CLI uses them to mint a token transparently.
-
-```yaml
-permissions:
-  contents: read
-  id-token: write       # required: lets the action mint a GitHub OIDC token
-  pull-requests: write  # only if you set vcs-comment: true
-```
-
-If you'd rather use an API key (e.g. running outside GitHub Actions, or pinning to a specific service account), set `auth-mode: api-key` and supply `api-key`. The CLI section below covers API-key usage.
 
 ### Quick start
 
-Drop this into `.github/workflows/manticore.yml` to scan every push and pull request — no API key needed:
+Drop this into `.github/workflows/manticore.yml` to scan every push and pull request:
 
 ```yaml
 on: [push, pull_request]
@@ -104,14 +84,14 @@ jobs:
           vcs-comment: true
 ```
 
-> **PRs from forks:** the default `GITHUB_TOKEN` is read-only on `pull_request` events triggered by forked repositories, so `vcs-comment: true` will fail to post (the scan itself still runs and reports findings in the job output). If you need PR comments on fork PRs, switch the workflow trigger to `pull_request_target` — but only after you've audited the security implications, since that trigger runs with the base repository's secrets.
+> **PRs from forks:** the default `GITHUB_TOKEN` is read-only on `pull_request` events triggered by forked repositories, so `vcs-comment: true` will fail to post (the scan itself still runs and reports findings in the job output). If you need PR comments on fork PRs, switch the workflow trigger to `pull_request_target`, but only after you've audited the security implications, since that trigger runs with the base repository's secrets.
 
 #### Inputs
 
 | Input | Description | Default |
-|---|---|---|
+|---|---|--|
 | `auth-mode` | Authentication mode: `github-oidc` (default) or `api-key`. `github-oidc` requires the workflow to grant `permissions: id-token: write`. | `github-oidc` |
-| `api-key` | Manticore API key. Required when `auth-mode: api-key`; ignored otherwise. | — |
+| `api-key` | Manticore API key. Required when `auth-mode: api-key`; ignored otherwise. |  |
 | `api-url` | API base URL. | `https://tazarsec.dev` |
 | `file` | Path to `package.json` / `package-lock.json`. | auto-detected in `working-directory` |
 | `format` | Output format: `table`, `json`, `sarif`. | `table` |
@@ -130,7 +110,7 @@ jobs:
 
 ### Setup action
 
-Installs the CLI on `PATH` and stops there. Use this when you want to drive `manticore` directly — to gate `npm install` at execution time, run scans on dynamically-resolved lockfiles, emit SARIF for code scanning, or chain it with other steps.
+Installs the CLI on `PATH` and stops there. Use this when you want to drive `manticore` directly to gate `npm install` at execution time, run scans on dynamically-resolved lockfiles, emit SARIF for code scanning, or chain it with other steps.
 
 #### Gate installs with `manticore exec`
 
@@ -177,7 +157,7 @@ jobs:
           sarif_file: manticore.sarif
 ```
 
-Configure runtime behavior via flags or `MANTICORE_*` environment variables — see [CLI](#cli) below.
+Configure runtime behavior via flags or `MANTICORE_*` environment variables. See [CLI](#cli) below.
 
 #### Inputs
 
@@ -201,7 +181,7 @@ cd ManticoreScanner
 go build -o manticore ./cmd/manticore
 ```
 
-Pre-built release binaries (`manticore-<os>-<arch>`) and a Docker image are also published — see [Verifying release artifacts](#verifying-release-artifacts) and [Docker](#docker).
+Pre-built release binaries (`manticore-<os>-<arch>`) and a Docker image are also published. See [Verifying release artifacts](#verifying-release-artifacts) and [Docker](#docker).
 
 ### `manticore scan`
 
@@ -211,8 +191,8 @@ Parses an npm lockfile (or `package.json`) and submits dependencies to the backe
 
 The CLI supports two auth modes, selected with `--auth-mode` or `MANTICORE_AUTH_MODE`:
 
-- **`api-key` (default)** — long-lived key passed via `--api-key` or `MANTICORE_API_KEY`. Use this for local runs and any CI other than GitHub Actions.
-- **`github-oidc`** — mint a short-lived JWT from GitHub Actions' OIDC provider (audience `tazarsec.dev`). Requires the workflow to grant `permissions: id-token: write`; the CLI reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` automatically. The wrapper [GitHub Action](#github-action) sets this mode by default — you only need to pass `--auth-mode github-oidc` when invoking the CLI directly inside a workflow.
+- **`api-key` (default)** - long-lived key passed via `--api-key` or `MANTICORE_API_KEY`. Use this for local runs and any CI other than GitHub Actions.
+- **`github-oidc`** - mint a short-lived JWT from GitHub Actions' OIDC provider (audience `tazarsec.dev`). Requires the workflow to grant `permissions: id-token: write`; the CLI reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` automatically. The wrapper [GitHub Action](#github-action) sets this mode by default. You only need to pass `--auth-mode github-oidc` when invoking the CLI directly inside a workflow.
 
 If `MANTICORE_API_KEY` is set while `--auth-mode=github-oidc` is selected, the CLI ignores the key and prints a warning.
 
@@ -263,7 +243,7 @@ manticore scan --api-key YOUR_API_KEY --production
 
 By default the scanner submits only **direct** dependencies (the entries in your `package.json` `dependencies` / `devDependencies`). The backend's behavioral analysis already executes transitive code when it installs each direct package, so most "live payload" supply-chain attacks are caught indirectly.
 
-If you want every package in the resolved tree submitted by name — useful for static signals like known-bad lists, typosquat heuristics, and per-package attribution in reports — opt in:
+If you want every package in the resolved tree submitted by name, opt in:
 
 ```bash
 manticore scan --api-key YOUR_API_KEY --include-transitive
@@ -273,7 +253,7 @@ Trade-off: this can multiply your scan volume by 10–100× on a typical Node pr
 
 #### Ignore specific packages
 
-Pass a file with one entry per line. Each entry must pin a specific release — either `name@version` or a lockfile integrity hash (e.g. `sha512-...`). Bare package names are rejected so an ignore never silently covers a future malicious version. Blank lines and lines starting with `#` are ignored. Matching packages are skipped before submission, so they don't count against your scan quota.
+Pass a file with one entry per line. Each entry must pin a specific release, either `name@version` or a lockfile integrity hash (e.g. `sha512-...`). Bare package names are rejected so an ignore never silently covers a future malicious version. Blank lines and lines starting with `#` are ignored. Matching packages are skipped before submission, so they don't count against your scan quota.
 
 Hash matching reads the `integrity` field from `package-lock.json`; entries in `package.json` have no hash and can only be ignored by `name@version`.
 
