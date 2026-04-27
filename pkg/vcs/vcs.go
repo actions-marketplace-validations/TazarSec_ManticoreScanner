@@ -17,5 +17,5 @@ type Context struct {
 type Provider interface {
 	Name() string
 	Detect() (*Context, error)
-	PostResults(ctx context.Context, vcsCtx *Context, results []api.BatchResultItem) error
+	PostResults(ctx context.Context, vcsCtx *Context, results []api.BatchResultItem, scanErr error) error
 }

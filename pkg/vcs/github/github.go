@@ -34,8 +34,8 @@ func (p *Provider) Detect() (*vcs.Context, error) {
 	return Detect()
 }
 
-func (p *Provider) PostResults(ctx context.Context, vcsCtx *vcs.Context, results []api.BatchResultItem) error {
-	body := buildCommentBody(results)
+func (p *Provider) PostResults(ctx context.Context, vcsCtx *vcs.Context, results []api.BatchResultItem, scanErr error) error {
+	body := buildCommentBody(results, scanErr)
 	return p.postOrUpdateComment(ctx, vcsCtx, body)
 }
 

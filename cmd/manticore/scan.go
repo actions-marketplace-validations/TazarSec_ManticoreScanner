@@ -113,7 +113,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	if cfg.PostToVCS {
-		if err := postToVCS(ctx, result); err != nil {
+		if err := postToVCS(ctx, result, scanErr); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to post VCS comment: %v\n", err)
 		} else if !cfg.Quiet {
 			fmt.Fprintln(os.Stderr, "Results posted to PR.")
@@ -168,11 +168,11 @@ func handleScanError(cfg scanner.Config, scanErr error, pending int) error {
 	}
 }
 
-func postToVCS(ctx context.Context, result *scanner.Result) error {
+func postToVCS(ctx context.Context, result *scanner.Result, scanErr error) error {
 	provider := github.NewProvider(nil)
 	vcsCtx, err := provider.Detect()
 	if err != nil {
 		return fmt.Errorf("detecting VCS environment: %w", err)
 	}
-	return provider.PostResults(ctx, vcsCtx, result.Items)
+	return provider.PostResults(ctx, vcsCtx, result.Items, scanErr)
 }

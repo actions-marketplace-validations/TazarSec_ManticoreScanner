@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,7 +36,7 @@ func TestBuildCommentBody_Suspicious(t *testing.T) {
 		},
 	}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 
 	if !strings.Contains(body, commentMarker) {
 		t.Error("expected comment marker")
@@ -84,7 +85,7 @@ func TestBuildCommentBody_NoSuspicious(t *testing.T) {
 		},
 	}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 	if !strings.Contains(body, "no suspicious") {
 		t.Error("expected 'no suspicious' message")
 	}
@@ -93,6 +94,66 @@ func TestBuildCommentBody_NoSuspicious(t *testing.T) {
 	}
 	if !strings.Contains(body, "✅") {
 		t.Error("expected check mark for clean scan")
+	}
+}
+
+func TestBuildCommentBody_ScanErroredWithPendingItems(t *testing.T) {
+	results := []api.BatchResultItem{
+		{Package: "lodash", Version: "4.17.21", Status: api.StatusInProgress},
+		{Package: "express", Version: "4.18.2", Status: api.StatusInProgress},
+		{Package: "ts-gaussian", Version: "3.0.5", Status: api.StatusInProgress},
+		{Package: "jest", Version: "29.0.0", Status: api.StatusInProgress},
+	}
+
+	scanErr := errors.New(`scan request failed: dial tcp: lookup tazarsec.dev on 127.0.0.53:53: no such host`)
+	body := buildCommentBody(results, scanErr)
+
+	if strings.Contains(body, "no suspicious behavior detected") && !strings.Contains(body, "completed items") {
+		t.Errorf("must not falsely claim a clean scan when scan errored:\n%s", body)
+	}
+	if strings.Contains(body, "✅") {
+		t.Errorf("must not show success checkmark when scan errored:\n%s", body)
+	}
+	if !strings.Contains(body, "did not complete successfully") {
+		t.Errorf("expected failure header in body:\n%s", body)
+	}
+	if !strings.Contains(body, "4 pending") {
+		t.Errorf("expected '4 pending' count in body:\n%s", body)
+	}
+	if !strings.Contains(body, "0 completed") {
+		t.Errorf("expected '0 completed' count in body:\n%s", body)
+	}
+	if !strings.Contains(body, "tazarsec.dev") {
+		t.Errorf("expected scan error message included in body:\n%s", body)
+	}
+}
+
+func TestBuildCommentBody_PartialFailureWithSuspicious(t *testing.T) {
+	results := []api.BatchResultItem{
+		{
+			Package: "evil-pkg",
+			Version: "1.0.0",
+			Status:  api.StatusCompleted,
+			Profile: &api.Profile{
+				SuspicionScore: 90,
+				SuspicionReasons: []api.SuspicionReason{
+					{Type: "unknown_network", Detail: "10.0.0.1:443", Severity: api.SeverityHigh, Phase: api.PhaseInstall},
+				},
+			},
+		},
+		{Package: "stuck-pkg", Version: "2.0.0", Status: api.StatusInProgress},
+	}
+
+	body := buildCommentBody(results, nil)
+
+	if !strings.Contains(body, "did not complete successfully") {
+		t.Errorf("expected failure header due to pending item:\n%s", body)
+	}
+	if !strings.Contains(body, "1 pending") {
+		t.Errorf("expected '1 pending' count:\n%s", body)
+	}
+	if !strings.Contains(body, "evil-pkg") {
+		t.Errorf("suspicious finding from completed item must still appear:\n%s", body)
 	}
 }
 
@@ -122,7 +183,7 @@ func TestBuildCommentBody_MultipleSuspicious(t *testing.T) {
 		},
 	}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 
 	// Higher score should appear first.
 	badBIdx := strings.Index(body, "bad-b")
@@ -156,7 +217,7 @@ func TestBuildCommentBody_DeduplicatesDetails(t *testing.T) {
 		},
 	}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 	if !strings.Contains(body, "×2") {
 		t.Error("expected deduplication marker ×2 for repeated /bin/sh")
 	}
@@ -185,7 +246,7 @@ func TestBuildCommentBody_TruncatesLongDetailLists(t *testing.T) {
 		},
 	}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 	if !strings.Contains(body, "and 5 more") {
 		t.Error("expected truncation message 'and 5 more' for 10 unique env vars")
 	}
@@ -324,7 +385,7 @@ func TestPostResults_CreatesComment(t *testing.T) {
 	// We need to point the provider to our test server.
 	// For this test, we'll validate buildCommentBody separately
 	// since the actual HTTP calls go to api.github.com.
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 	if !strings.Contains(body, "evil-pkg") {
 		t.Error("expected evil-pkg in comment body")
 	}

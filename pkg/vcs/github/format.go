@@ -277,37 +277,69 @@ func writePackageSection(sb *strings.Builder, r api.BatchResultItem) {
 	sb.WriteString("</details>\n\n")
 }
 
-func buildCommentBody(results []api.BatchResultItem) string {
+func buildCommentBody(results []api.BatchResultItem, scanErr error) string {
 	var sb strings.Builder
 	sb.WriteString(commentMarker + "\n")
 	sb.WriteString("## Manticore Security Scan Results\n\n")
 
-	var suspicious []api.BatchResultItem
+	var (
+		suspicious []api.BatchResultItem
+		completed  int
+		pending    int
+		errored    int
+	)
 	for _, r := range results {
-		if r.Profile != nil && r.Profile.SuspicionScore > 0 {
+		switch {
+		case r.Profile != nil && r.Profile.SuspicionScore > 0:
 			suspicious = append(suspicious, r)
+			completed++
+		case r.Status == api.StatusCompleted:
+			completed++
+		case r.Error != "":
+			errored++
+		default:
+			pending++
 		}
 	}
 
-	if len(suspicious) == 0 {
-		pkg := "packages"
-		if len(results) == 1 {
-			pkg = "package"
-		}
-		sb.WriteString(fmt.Sprintf("✅ **%d %s scanned** — no suspicious behavior detected.\n", len(results), pkg))
-		return sb.String()
-	}
-
-	highest := overallHighestSeverity(suspicious)
 	pkgWord := "packages"
 	if len(results) == 1 {
 		pkgWord = "package"
 	}
-	sb.WriteString(fmt.Sprintf("**%d %s scanned** · **%d suspicious** · Highest severity: %s **%s**\n\n",
-		len(results), pkgWord,
-		len(suspicious),
-		severityIcon(highest), severityLabel(highest),
-	))
+
+	failed := scanErr != nil || pending > 0 || errored > 0
+
+	if failed {
+		sb.WriteString("⚠️ **Scan did not complete successfully.**\n\n")
+		if scanErr != nil {
+			sb.WriteString(fmt.Sprintf("**Error:** %s\n\n", sanitizeText(scanErr.Error())))
+		}
+		sb.WriteString(fmt.Sprintf("**%d %s** submitted · **%d completed** · **%d pending** · **%d failed**\n\n",
+			len(results), pkgWord, completed, pending, errored))
+	}
+
+	if len(suspicious) == 0 {
+		if !failed {
+			sb.WriteString(fmt.Sprintf("✅ **%d %s scanned** — no suspicious behavior detected.\n", len(results), pkgWord))
+		} else if completed > 0 {
+			sb.WriteString("No suspicious behavior detected in completed items.\n")
+		}
+		return sb.String()
+	}
+
+	highest := overallHighestSeverity(suspicious)
+	if !failed {
+		sb.WriteString(fmt.Sprintf("**%d %s scanned** · **%d suspicious** · Highest severity: %s **%s**\n\n",
+			len(results), pkgWord,
+			len(suspicious),
+			severityIcon(highest), severityLabel(highest),
+		))
+	} else {
+		sb.WriteString(fmt.Sprintf("**%d suspicious** · Highest severity: %s **%s**\n\n",
+			len(suspicious),
+			severityIcon(highest), severityLabel(highest),
+		))
+	}
 	sb.WriteString("---\n\n")
 
 	sort.Slice(suspicious, func(i, j int) bool {

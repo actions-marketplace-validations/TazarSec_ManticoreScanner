@@ -98,7 +98,7 @@ func TestBuildCommentBody_HostileInputsAreSanitized(t *testing.T) {
 		},
 	}}
 
-	body := buildCommentBody(results)
+	body := buildCommentBody(results, nil)
 
 	// Substring checks for purely-injected structures (the formatter never
 	// emits these itself).
