@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 )
 
 type AuthError struct {
@@ -41,17 +43,17 @@ func (e *ServerError) Error() string {
 
 type Client struct {
 	baseURL    string
-	apiKey     string
+	auth       auth.Authenticator
 	httpClient *http.Client
 }
 
-func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
+func NewClient(baseURL string, authenticator auth.Authenticator, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = NewHTTPClient(0)
 	}
 	return &Client{
 		baseURL:    baseURL,
-		apiKey:     apiKey,
+		auth:       authenticator,
 		httpClient: httpClient,
 	}
 }
@@ -84,7 +86,11 @@ func (c *Client) ScanBatch(ctx context.Context, items []ScanRequestItem) (*Batch
 		return nil, 0, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	authHeader, err := c.auth.AuthorizationHeader(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("building Authorization header: %w", err)
+	}
+	req.Header.Set("Authorization", authHeader)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -6,6 +6,7 @@ Scan npm dependencies for malicious code using the Manticore behavioral analysis
 
 - [Requirements](#requirements)
 - [GitHub Action](#github-action)
+  - [Authentication](#authentication)
   - [Quick start](#quick-start)
   - [Scan action](#scan-action)
   - [Setup action](#setup-action)
@@ -21,7 +22,7 @@ Scan npm dependencies for malicious code using the Manticore behavioral analysis
 
 ## Requirements
 
-- A Manticore API key. Sign up at [tazarsec.dev](https://tazarsec.dev) to obtain one, then store it as an Actions secret (e.g. `MANTICORE_API_KEY`).
+- A Manticore account at [tazarsec.dev](https://tazarsec.dev). The GitHub Action authenticates via short-lived GitHub OIDC tokens by default — no long-lived API key needed. The CLI supports both OIDC and API-key auth (see [Authentication](#authentication)).
 - A GitHub-hosted or self-hosted runner on Linux, macOS, or Windows (amd64 or arm64).
 - An npm project with a `package.json` and/or `package-lock.json` checked into the repository.
 
@@ -46,12 +47,31 @@ The action accepts SHA pins and resolves them back to the matching release tag t
 
 The floating `@v1` and lightweight `@v1.2.3` tag pins are also supported for convenience, but SHA pinning is the recommended option when hardening your supply chain.
 
+### Authentication
+
+The action authenticates to the Manticore backend with **GitHub OIDC tokens** by default. Each scan mints a short-lived JWT scoped to the calling workflow (audience `tazarsec.dev`) — no long-lived API key needs to live in Actions secrets, and Manticore can attribute each scan to a specific repository, ref, and workflow.
+
+To enable OIDC, the calling workflow must grant the `id-token: write` permission. The runner then exposes `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` to the action; the CLI uses them to mint a token transparently.
+
+```yaml
+permissions:
+  contents: read
+  id-token: write       # required: lets the action mint a GitHub OIDC token
+  pull-requests: write  # only if you set vcs-comment: true
+```
+
+If you'd rather use an API key (e.g. running outside GitHub Actions, or pinning to a specific service account), set `auth-mode: api-key` and supply `api-key`. The CLI section below covers API-key usage.
+
 ### Quick start
 
-Drop this into `.github/workflows/manticore.yml` to scan every push and pull request — no other configuration required:
+Drop this into `.github/workflows/manticore.yml` to scan every push and pull request — no API key needed:
 
 ```yaml
 on: [push, pull_request]
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   manticore:
@@ -59,11 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
       - uses: TazarSec/ManticoreScanner@v1
-        with:
-          api-key: ${{ secrets.MANTICORE_API_KEY }}
 ```
 
-The action auto-detects your `package-lock.json` (or `package.json`), fails the job on any non-zero suspicion score, and prints a results table to the job log. See the [scan action](#scan-action) section below to enable PR comments, raise the fail threshold, emit SARIF, and more.
+The action auto-detects your `package-lock.json` (or `package.json`), authenticates with a freshly-minted GitHub OIDC token, fails the job on any non-zero suspicion score, and prints a results table to the job log. See the [scan action](#scan-action) section below to enable PR comments, raise the fail threshold, emit SARIF, and more.
 
 ### Scan action
 
@@ -72,6 +90,7 @@ Runs `manticore scan` against your lockfile and reports the results. Use this wh
 ```yaml
 permissions:
   contents: read
+  id-token: write
   pull-requests: write
 
 jobs:
@@ -81,7 +100,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
       - uses: TazarSec/ManticoreScanner@v1
         with:
-          api-key: ${{ secrets.MANTICORE_API_KEY }}
           fail-on: 50
           vcs-comment: true
 ```
@@ -92,7 +110,8 @@ jobs:
 
 | Input | Description | Default |
 |---|---|---|
-| `api-key` | Manticore API key. **Required.** | — |
+| `auth-mode` | Authentication mode: `github-oidc` (default) or `api-key`. `github-oidc` requires the workflow to grant `permissions: id-token: write`. | `github-oidc` |
+| `api-key` | Manticore API key. Required when `auth-mode: api-key`; ignored otherwise. | — |
 | `api-url` | API base URL. | `https://tazarsec.dev` |
 | `file` | Path to `package.json` / `package-lock.json`. | auto-detected in `working-directory` |
 | `format` | Output format: `table`, `json`, `sarif`. | `table` |
@@ -118,11 +137,15 @@ Installs the CLI on `PATH` and stops there. Use this when you want to drive `man
 `manticore exec` wraps a package manager install command. It first resolves the dependency tree to a lockfile **without executing install scripts**, scans every package, and only invokes the real install if the scan passes. This blocks malicious payloads on the runner before they get a chance to run.
 
 ```yaml
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      MANTICORE_API_KEY: ${{ secrets.MANTICORE_API_KEY }}
+      MANTICORE_AUTH_MODE: github-oidc
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
       - uses: TazarSec/ManticoreScanner/setup@v1
@@ -135,11 +158,15 @@ Supported package managers: `npm`. Supported subcommands: `install`, `ci`, and `
 #### Run a scan as a workflow step
 
 ```yaml
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   scan:
     runs-on: ubuntu-latest
     env:
-      MANTICORE_API_KEY: ${{ secrets.MANTICORE_API_KEY }}
+      MANTICORE_AUTH_MODE: github-oidc
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
       - uses: TazarSec/ManticoreScanner/setup@v1
@@ -179,6 +206,15 @@ Pre-built release binaries (`manticore-<os>-<arch>`) and a Docker image are also
 ### `manticore scan`
 
 Parses an npm lockfile (or `package.json`) and submits dependencies to the backend for behavioral analysis.
+
+#### Authentication modes
+
+The CLI supports two auth modes, selected with `--auth-mode` or `MANTICORE_AUTH_MODE`:
+
+- **`api-key` (default)** — long-lived key passed via `--api-key` or `MANTICORE_API_KEY`. Use this for local runs and any CI other than GitHub Actions.
+- **`github-oidc`** — mint a short-lived JWT from GitHub Actions' OIDC provider (audience `tazarsec.dev`). Requires the workflow to grant `permissions: id-token: write`; the CLI reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` automatically. The wrapper [GitHub Action](#github-action) sets this mode by default — you only need to pass `--auth-mode github-oidc` when invoking the CLI directly inside a workflow.
+
+If `MANTICORE_API_KEY` is set while `--auth-mode=github-oidc` is selected, the CLI ignores the key and prints a warning.
 
 #### Basic scan
 
@@ -285,7 +321,8 @@ Every variable below is optional and overridden by the equivalent CLI flag when 
 
 | Variable | Description | Default |
 |---|---|---|
-| `MANTICORE_API_KEY` | API key (alternative to `--api-key`). | — |
+| `MANTICORE_AUTH_MODE` | Authentication mode: `api-key` or `github-oidc`. | `api-key` |
+| `MANTICORE_API_KEY` | API key (alternative to `--api-key`). Used when `MANTICORE_AUTH_MODE=api-key`. | — |
 | `MANTICORE_API_URL` | API base URL. | `https://tazarsec.dev` |
 | `MANTICORE_TIMEOUT` | Polling timeout in seconds. | `300` |
 | `MANTICORE_HTTP_TIMEOUT` | Per-request HTTP timeout in seconds. | `120` |

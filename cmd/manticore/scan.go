@@ -34,8 +34,9 @@ var scanCmd = &cobra.Command{
 
 func init() {
 	f := scanCmd.Flags()
-	f.StringVar(&flags.APIKey, "api-key", "", "API key (or set MANTICORE_API_KEY)")
+	f.StringVar(&flags.APIKey, "api-key", "", "API key (or set MANTICORE_API_KEY). Used when --auth-mode=api-key (default).")
 	f.StringVar(&flags.APIURL, "api-url", "", "API base URL (or set MANTICORE_API_URL)")
+	f.StringVar(&flags.AuthMode, "auth-mode", "", "Authentication mode: api-key (default) or github-oidc. github-oidc requires the workflow to grant `permissions: id-token: write`. (or set MANTICORE_AUTH_MODE)")
 	f.StringVar(&flags.File, "file", "", "Path to package.json or package-lock.json (default: auto-detect in cwd)")
 	f.StringVar(&flags.Format, "format", "", "Output format: table, json, sarif (default: table)")
 	f.StringVar(&flags.Output, "output", "", "Write output to file (default: stdout)")
@@ -57,13 +58,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	flags.InsecureSet = cmd.Flags().Changed("insecure")
 	flags.IncludeTransitiveSet = cmd.Flags().Changed("include-transitive")
 
-	cfg, err := config.Resolve(flags)
+	cfg, err := config.Resolve(flags, os.Stderr)
 	if err != nil {
 		return err
-	}
-
-	if cfg.APIKey == "" {
-		return fmt.Errorf("API key is required. Set --api-key or MANTICORE_API_KEY environment variable")
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)

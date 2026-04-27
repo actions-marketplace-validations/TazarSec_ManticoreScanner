@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 )
 
 func TestValidateBackendURL_HTTPSAllowed(t *testing.T) {
@@ -148,7 +150,7 @@ func TestScanBatch_RejectsHugeResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("test-key"), server.Client())
 	_, _, err := client.ScanBatch(context.Background(), []ScanRequestItem{
 		{Package: "x", Version: "1"},
 	})
@@ -163,7 +165,7 @@ func TestScanBatch_RejectsHugeResponse(t *testing.T) {
 // Compile-time guard that we don't accidentally hand http.DefaultClient
 // to NewClient, which would bypass our timeouts and TLS minimum.
 func TestNewClient_DefaultIsHardened(t *testing.T) {
-	c := NewClient("https://example.com", "k", nil)
+	c := NewClient("https://example.com", auth.NewAPIKeyAuthenticator("k"), nil)
 	if c.httpClient == http.DefaultClient {
 		t.Fatal("NewClient must not fall back to http.DefaultClient")
 	}

@@ -40,8 +40,9 @@ Examples:
 
 func init() {
 	f := execCmd.Flags()
-	f.String("api-key", "", "API key (or set MANTICORE_API_KEY)")
+	f.String("api-key", "", "API key (or set MANTICORE_API_KEY). Used when --auth-mode=api-key (default).")
 	f.String("api-url", "", "Backend API base URL (or set MANTICORE_API_URL)")
+	f.String("auth-mode", "", "Authentication mode: api-key (default) or github-oidc. github-oidc requires the workflow to grant `permissions: id-token: write`. (or set MANTICORE_AUTH_MODE)")
 	f.String("format", "", "Output format for scan results: table, json, sarif (default: table)")
 	f.String("ignore-list", "", "Path to a file with packages to skip (one per line; each entry must be name@version or an integrity hash like sha512-...; '#' starts a comment)")
 	f.String("on-error", "", "What to do on backend errors or polling deadline exceeded with pending items: fail (block install) or continue (proceed with install). Default: fail")
@@ -59,6 +60,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	apiKey, _ := f.GetString("api-key")
 	apiURL, _ := f.GetString("api-url")
+	authMode, _ := f.GetString("auth-mode")
 	format, _ := f.GetString("format")
 	ignoreList, _ := f.GetString("ignore-list")
 	onError, _ := f.GetString("on-error")
@@ -73,6 +75,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	cliFlags := config.CLIFlags{
 		APIKey:         apiKey,
 		APIURL:         apiURL,
+		AuthMode:       authMode,
 		Format:         format,
 		IgnoreListFile: ignoreList,
 		OnError:        onError,
@@ -86,13 +89,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Insecure:       insecure,
 		InsecureSet:    f.Changed("insecure"),
 	}
-	scanCfg, err := config.Resolve(cliFlags)
+	scanCfg, err := config.Resolve(cliFlags, os.Stderr)
 	if err != nil {
 		return err
-	}
-
-	if scanCfg.APIKey == "" {
-		return fmt.Errorf("API key required: set --api-key or MANTICORE_API_KEY environment variable")
 	}
 
 	dir, err := os.Getwd()

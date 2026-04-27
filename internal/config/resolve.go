@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
 	"github.com/TazarSec/ManticoreScanner/pkg/api"
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 	"github.com/TazarSec/ManticoreScanner/pkg/scanner"
 )
 
@@ -16,6 +18,7 @@ const (
 	defaultFormat           = "table"
 	defaultFailureThreshold = 1
 	defaultOnError          = OnErrorFail
+	defaultAuthMode         = auth.ModeAPIKey
 )
 
 const (
@@ -26,6 +29,7 @@ const (
 type CLIFlags struct {
 	APIKey               string
 	APIURL               string
+	AuthMode             string
 	File                 string
 	Format               string
 	Output               string
@@ -45,9 +49,25 @@ type CLIFlags struct {
 	IncludeTransitiveSet bool
 }
 
-func Resolve(flags CLIFlags) (scanner.Config, error) {
+// Resolve merges CLI flags, environment variables, and defaults into a
+// scanner.Config. Warnings (e.g. unused MANTICORE_API_KEY in OIDC mode)
+// are written to warnW; pass io.Discard to silence them.
+func Resolve(flags CLIFlags, warnW io.Writer) (scanner.Config, error) {
+	if warnW == nil {
+		warnW = io.Discard
+	}
+
+	apiKey := envOrDefault("MANTICORE_API_KEY", "")
+	if flags.APIKey != "" {
+		apiKey = flags.APIKey
+	}
+
+	authMode := envOrDefault("MANTICORE_AUTH_MODE", defaultAuthMode)
+	if flags.AuthMode != "" {
+		authMode = flags.AuthMode
+	}
+
 	cfg := scanner.Config{
-		APIKey:            envOrDefault("MANTICORE_API_KEY", ""),
 		APIBaseURL:        envOrDefault("MANTICORE_API_URL", defaultAPIURL),
 		TimeoutSec:        envIntOrDefault("MANTICORE_TIMEOUT", defaultTimeout),
 		HTTPTimeoutSec:    envIntOrDefault("MANTICORE_HTTP_TIMEOUT", defaultHTTPTimeout),
@@ -63,9 +83,6 @@ func Resolve(flags CLIFlags) (scanner.Config, error) {
 		IncludeTransitive: envBoolOrDefault("MANTICORE_INCLUDE_TRANSITIVE", false),
 	}
 
-	if flags.APIKey != "" {
-		cfg.APIKey = flags.APIKey
-	}
 	if flags.APIURL != "" {
 		cfg.APIBaseURL = flags.APIURL
 	}
@@ -123,6 +140,12 @@ func Resolve(flags CLIFlags) (scanner.Config, error) {
 		return scanner.Config{}, fmt.Errorf("--http-timeout must be >= 0 (got %d)", cfg.HTTPTimeoutSec)
 	}
 
+	authenticator, err := buildAuthenticator(authMode, apiKey, warnW)
+	if err != nil {
+		return scanner.Config{}, err
+	}
+	cfg.Auth = authenticator
+
 	ignoreListPath := flags.IgnoreListFile
 	if ignoreListPath == "" {
 		ignoreListPath = os.Getenv("MANTICORE_IGNORE_LIST")
@@ -136,6 +159,26 @@ func Resolve(flags CLIFlags) (scanner.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func buildAuthenticator(mode, apiKey string, warnW io.Writer) (auth.Authenticator, error) {
+	switch mode {
+	case auth.ModeAPIKey:
+		if apiKey == "" {
+			return nil, fmt.Errorf("API key is required for --auth-mode=%s. Set --api-key or MANTICORE_API_KEY environment variable", auth.ModeAPIKey)
+		}
+		return auth.NewAPIKeyAuthenticator(apiKey), nil
+	case auth.ModeGitHubOIDC:
+		if apiKey != "" {
+			fmt.Fprintf(warnW, "Warning: ignoring MANTICORE_API_KEY/--api-key because --auth-mode=%s is set\n", auth.ModeGitHubOIDC)
+		}
+		return auth.NewGitHubOIDCAuthenticator(auth.GitHubOIDCConfig{
+			RequestURL:   os.Getenv(auth.EnvGitHubOIDCRequestURL),
+			RequestToken: os.Getenv(auth.EnvGitHubOIDCRequestToken),
+		})
+	default:
+		return nil, fmt.Errorf("invalid --auth-mode value %q (must be %q or %q)", mode, auth.ModeAPIKey, auth.ModeGitHubOIDC)
+	}
 }
 
 func envOrDefault(key, def string) string {

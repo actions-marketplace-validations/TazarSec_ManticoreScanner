@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 )
 
 func TestPollUntilComplete_ImmediateCompletion(t *testing.T) {
@@ -20,7 +22,7 @@ func TestPollUntilComplete_ImmediateCompletion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("key"), server.Client())
 	cfg := DefaultPollerConfig()
 	cfg.Timeout = 5 * time.Second
 
@@ -60,7 +62,7 @@ func TestPollUntilComplete_EventualCompletion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("key"), server.Client())
 	cfg := DefaultPollerConfig()
 	cfg.Timeout = 30 * time.Second
 	cfg.InitialInterval = 100 * time.Millisecond
@@ -91,7 +93,7 @@ func TestPollUntilComplete_Timeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("key"), server.Client())
 	cfg := DefaultPollerConfig()
 	cfg.Timeout = 500 * time.Millisecond
 	cfg.InitialInterval = 100 * time.Millisecond
@@ -125,7 +127,7 @@ func TestPollUntilComplete_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	client := NewClient(server.URL, "key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("key"), server.Client())
 	cfg := DefaultPollerConfig()
 	cfg.Timeout = 10 * time.Second
 	cfg.InitialInterval = 100 * time.Millisecond

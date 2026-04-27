@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/TazarSec/ManticoreScanner/pkg/api"
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 	"github.com/TazarSec/ManticoreScanner/pkg/parser"
 )
 
@@ -38,7 +39,7 @@ func TestRun_ForwardsIntegrityAsHash(t *testing.T) {
 	defer server.Close()
 
 	cfg := Config{
-		APIKey:     "test-key",
+		Auth:       auth.NewAPIKeyAuthenticator("test-key"),
 		APIBaseURL: server.URL,
 		InputPath:  "../../testdata/package-lock-v3.json",
 		TimeoutSec: 5,

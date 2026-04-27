@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/TazarSec/ManticoreScanner/pkg/auth"
 )
 
 func TestScanBatch_Success(t *testing.T) {
@@ -54,7 +56,7 @@ func TestScanBatch_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("test-key"), server.Client())
 	resp, status, err := client.ScanBatch(context.Background(), []ScanRequestItem{
 		{Package: "lodash", Version: "4.17.21", Ecosystem: EcosystemNPM},
 	})
@@ -87,7 +89,7 @@ func TestScanBatch_Accepted(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("test-key"), server.Client())
 	resp, status, err := client.ScanBatch(context.Background(), []ScanRequestItem{
 		{Package: "lodash", Version: "4.17.21"},
 	})
@@ -109,7 +111,7 @@ func TestScanBatch_AuthError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "bad-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("bad-key"), server.Client())
 	_, _, err := client.ScanBatch(context.Background(), []ScanRequestItem{
 		{Package: "lodash", Version: "4.17.21"},
 	})
@@ -133,7 +135,7 @@ func TestScanBatch_RateLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("test-key"), server.Client())
 	_, _, err := client.ScanBatch(context.Background(), []ScanRequestItem{
 		{Package: "lodash", Version: "4.17.21"},
 	})
@@ -156,7 +158,7 @@ func TestScanBatch_ValidationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", server.Client())
+	client := NewClient(server.URL, auth.NewAPIKeyAuthenticator("test-key"), server.Client())
 	_, _, err := client.ScanBatch(context.Background(), []ScanRequestItem{})
 	if err == nil {
 		t.Fatal("expected error")

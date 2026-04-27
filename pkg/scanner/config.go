@@ -1,7 +1,9 @@
 package scanner
 
+import "github.com/TazarSec/ManticoreScanner/pkg/auth"
+
 type Config struct {
-	APIKey            string
+	Auth              auth.Authenticator
 	APIBaseURL        string
 	TimeoutSec        int
 	HTTPTimeoutSec    int

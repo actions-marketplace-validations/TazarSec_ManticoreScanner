@@ -6,9 +6,14 @@ branding:
   color: "red"
 
 inputs:
+  auth-mode:
+    description: "Authentication mode: 'github-oidc' (default) or 'api-key'. github-oidc requires the calling workflow to grant `permissions: id-token: write`."
+    required: false
+    default: "github-oidc"
   api-key:
-    description: "Manticore API key."
-    required: true
+    description: "Manticore API key. Required when auth-mode is 'api-key'; ignored when auth-mode is 'github-oidc'."
+    required: false
+    default: ""
   api-url:
     description: "Manticore API base URL. Defaults to the CLI's built-in value."
     required: false
@@ -169,6 +174,7 @@ runs:
       env:
         MANTICORE_API_KEY: ${{ inputs.api-key }}
         MANTICORE_API_URL: ${{ inputs.api-url }}
+        MANTICORE_AUTH_MODE: ${{ inputs.auth-mode }}
         GITHUB_TOKEN: ${{ github.token }}
         INPUT_FILE: ${{ inputs.file }}
         INPUT_FORMAT: ${{ inputs.format }}

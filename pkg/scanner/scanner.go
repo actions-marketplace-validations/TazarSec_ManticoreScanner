@@ -44,7 +44,7 @@ func Run(ctx context.Context, cfg Config, onProgress func(completed, total int))
 	}
 
 	httpClient := api.NewHTTPClient(time.Duration(cfg.HTTPTimeoutSec) * time.Second)
-	client := api.NewClient(cfg.APIBaseURL, cfg.APIKey, httpClient)
+	client := api.NewClient(cfg.APIBaseURL, cfg.Auth, httpClient)
 
 	timeout := time.Duration(cfg.TimeoutSec) * time.Second
 	if timeout == 0 {
