@@ -1,0 +1,301 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      major: ${{ steps.next.outputs.major }}
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          latest=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "${latest}" ]; then
+            latest="v0.0.0"
+          fi
+          current=${latest#v}
+          IFS='.' read -r major minor patch <<< "${current}"
+          case "${BUMP}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "Unknown bump type: ${BUMP}"; exit 1 ;;
+          esac
+          version="${major}.${minor}.${patch}"
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists" >&2
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "major=${major}"
+            echo "tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Previous: ${latest} -> New: ${tag}"
+
+  test:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  build:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="manticore-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/TazarSec/ManticoreScanner/internal/buildinfo.Version=${VERSION}" \
+            -o "dist/${name}" \
+            ./cmd/manticore
+          (cd dist && sha256sum "${name}" > "${name}.sha256")
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #7.0.1
+        with:
+          name: manticore-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          cat ./*.sha256 | sort -k2 > checksums.txt
+          rm ./*.sha256
+          echo "Release artifacts:"
+          ls -la
+          echo "Checksums:"
+          cat checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 #3.0.5
+
+      - name: Sign checksums with cosign (keyless)
+        working-directory: dist
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --bundle checksums.txt.cosign.bundle \
+            checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 #4.1.0
+        with:
+          subject-path: "dist/manticore-*"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create immutable version tag
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "${TAG}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --generate-notes \
+            --verify-tag \
+            dist/*
+
+      - name: Update floating major-version tag
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          MAJOR_TAG: v${{ needs.version.outputs.major }}
+        run: |
+          set -euo pipefail
+          git tag -f "${MAJOR_TAG}" "${TAG}"
+          git push origin "${MAJOR_TAG}" --force
+
+  docker:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #6.0.2
+
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #4.0.0
+
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #4.0.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 #3.0.5
+
+      - name: Verify distroless base image signature
+        id: base
+        env:
+          BASE_REF: gcr.io/distroless/static-debian13@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect "${BASE_REF}" --format '{{.Manifest.Digest}}')
+          repo="${BASE_REF%@*}"
+          pinned="${repo}@${digest}"
+          echo "Verifying ${pinned}"
+          cosign verify "${pinned}" \
+            --certificate-oidc-issuer https://accounts.google.com \
+            --certificate-identity keyless@distroless.iam.gserviceaccount.com \
+            > /dev/null
+          echo "pinned=${pinned}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #4.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 #5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.tag }}
+            type=raw,value=v${{ needs.version.outputs.major }}
+            type=raw,value=latest
+
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #7.1.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            BASE_IMAGE=${{ steps.base.outputs.pinned }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign image with cosign (keyless)
+        env:
+          COSIGN_YES: "true"
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # metadata-action emits a newline-separated tag list; they all
+          # resolve to the same digest, so sign the digest reference once.
+          first_tag=$(printf '%s\n' "${IMAGE_REF}" | head -n1)
+          image="${first_tag%:*}"
+          cosign sign "${image}@${DIGEST}"
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 #4.1.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

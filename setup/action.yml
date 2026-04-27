@@ -1,0 +1,98 @@
+name: "Setup Manticore"
+description: "Install the Manticore CLI on the runner PATH so you can invoke manticore commands from your own pipeline steps."
+author: "Manticore"
+
+inputs:
+  version:
+    description: "Release tag to install (e.g. v1.2.3). Defaults to the ref this action was invoked with."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install manticore
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        repo="${ACTION_REPOSITORY:-}"
+        if [ -z "${repo}" ]; then
+          repo="${GITHUB_REPOSITORY}"
+        fi
+
+        version="${INPUT_VERSION}"
+        if [ -z "${version}" ]; then
+          version="${ACTION_REF:-}"
+        fi
+        if [ -z "${version}" ] || [ "${version}" = "main" ] || [ "${version}" = "master" ]; then
+          version=$(gh release view --repo "${repo}" --json tagName -q .tagName)
+        fi
+
+        if [[ "${version}" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "Resolving commit ${version} to a release tag..."
+          resolved=$(gh api "repos/${repo}/git/matching-refs/tags" \
+            --jq ".[] | select(.object.sha == \"${version}\") | .ref" \
+            | sed 's|^refs/tags/||' \
+            | head -n1)
+          if [ -z "${resolved}" ]; then
+            echo "Commit ${version} is not pointed at by any release tag in ${repo}." >&2
+            echo "Pin to a tagged release commit, or pass version: vX.Y.Z explicitly." >&2
+            exit 1
+          fi
+          version="${resolved}"
+          echo "Resolved to ${version}"
+        fi
+
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        case "${os}" in
+          linux|darwin) ;;
+          mingw*|msys*|cygwin*) os=windows ;;
+          *) echo "Unsupported OS: ${os}" >&2; exit 1 ;;
+        esac
+
+        arch=$(uname -m)
+        case "${arch}" in
+          x86_64|amd64) arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "Unsupported arch: ${arch}" >&2; exit 1 ;;
+        esac
+
+        ext=""
+        if [ "${os}" = "windows" ]; then
+          ext=".exe"
+        fi
+
+        asset="manticore-${os}-${arch}${ext}"
+        install_dir="${RUNNER_TEMP}/manticore-${version}"
+        mkdir -p "${install_dir}"
+
+        case "${version}" in
+          -*) echo "Refusing to download release with flag-like tag: ${version}" >&2; exit 1 ;;
+        esac
+
+        echo "Downloading ${asset} from ${repo}@${version}"
+        gh release download \
+          --repo "${repo}" \
+          --pattern "${asset}" \
+          --pattern "checksums.txt" \
+          --dir "${install_dir}" \
+          --clobber \
+          -- "${version}"
+
+        (
+          cd "${install_dir}"
+          grep "  ${asset}\$" checksums.txt > "${asset}.sha256"
+          sha256sum -c "${asset}.sha256"
+        )
+
+        gh attestation verify "${install_dir}/${asset}" --repo "${repo}"
+
+        chmod +x "${install_dir}/${asset}"
+        mv "${install_dir}/${asset}" "${install_dir}/manticore${ext}"
+        echo "${install_dir}" >> "${GITHUB_PATH}"
