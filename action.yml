@@ -1,5 +1,5 @@
 name: "Manticore Scanner"
-description: "Detect malicious npm dependencies through behavioral analysis — runs each package in a sandbox to catch supply-chain attacks before they ship."
+description: "Detect malicious npm dependencies through behavioral analysis."
 author: "Manticore"
 branding:
   icon: "shield"
