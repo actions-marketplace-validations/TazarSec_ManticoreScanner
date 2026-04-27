@@ -1,0 +1,100 @@
+name: Marketplace smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ManticoreScanner release tag to test"
+        required: false
+        default: "v0.0.1"
+  pull_request:
+    paths:
+      - ".github/workflows/marketplace-smoke.yml"
+      - "testdata/**"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  scan-action:
+    name: scan action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Manticore scan against testdata fixture
+        uses: TazarSec/ManticoreScanner@v0.0.1
+        with:
+          version: ${{ inputs.version }}
+          working-directory: testdata
+          file: package.json
+          fail-on: 100
+          format: table
+
+  scan-action-sarif:
+    name: scan action -> SARIF upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: TazarSec/ManticoreScanner@v0.0.1
+        with:
+          version: ${{ inputs.version }}
+          working-directory: testdata
+          file: package.json
+          fail-on: 100
+          format: sarif
+          output: manticore.sarif
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: testdata/manticore.sarif
+          category: manticore
+
+  setup-action:
+    name: setup action -> manticore scan
+    runs-on: ubuntu-latest
+    env:
+      MANTICORE_AUTH_MODE: github-oidc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: TazarSec/ManticoreScanner/setup@v0.0.1
+        with:
+          version: ${{ inputs.version }}
+
+      - name: Verify CLI is on PATH
+        run: manticore --version
+
+      - name: Run scan via CLI
+        working-directory: testdata
+        run: manticore scan --file package.json --fail-on 100 --format json
+
+  pr-comment:
+    name: scan action -> PR comment
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: TazarSec/ManticoreScanner@v0.0.1
+        with:
+          version: ${{ inputs.version }}
+          working-directory: testdata
+          file: package.json
+          fail-on: 100
+          vcs-comment: true
